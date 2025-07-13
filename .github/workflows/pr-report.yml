@@ -3,7 +3,7 @@ name: Daily PR Report
 on:
   schedule:
     - cron: '0 8 * * *'   # Runs daily at 08:00 UTC
-  workflow_dispatch:      # Manual trigger option
+  workflow_dispatch:      # Manual trigger 
 
 jobs:
   send_pr_report:
