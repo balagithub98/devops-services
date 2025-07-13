@@ -2,34 +2,34 @@ name: Daily PR Report
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # Runs daily at 08:00 UTC
-  workflow_dispatch:      # Manual trigger 
+    - cron: '0 9 * * *'  # Runs every day at 09:00 UTC
+  workflow_dispatch:    # Allows manual trigger
 
 jobs:
-  send_pr_report:
+  send-pr-report:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
-      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-      TEAM_EMAILS: ${{ secrets.TEAM_EMAILS }}
-      GITHUB_REPOS: ${{ secrets.GITHUB_REPOS }}
-      SMTP_SERVER: smtp.gmail.com
-      SMTP_PORT: 587
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.9
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: '3.9'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install pandas requests openpyxl
 
-      - name: Run PR report script
+      - name: Run PR Report Script
+        env:
+          MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          MY_GITHUB_REPOS: ${{ secrets.MY_GITHUB_REPOS }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          TEAM_EMAILS: ${{ secrets.TEAM_EMAILS }}
+          SMTP_SERVER: smtp.gmail.com
+          SMTP_PORT: 587
         run: python scripts/send_pr_report.py
