@@ -1,110 +1,135 @@
 import os
+import requests
+import pandas as pd
 import smtplib
-import pathlib
-import traceback
-from github import Github, GithubException
-from openpyxl import Workbook
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
+from email.message import EmailMessage
+from requests.exceptions import HTTPError, RequestException
 
-# === CONFIGURATION ===
-REPOSITORIES = [
-    "your-org/repo-1",
-    "your-org/repo-2",
-    # Add more repositories as needed
-]
-RECIPIENTS = [
-    "dev-team@example.com",
-    "qa-team@example.com"
-]
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 465  # Use 587 for TLS if not using SSL
+# Read environment variables
+GITHUB_REPOS = os.getenv('GITHUB_REPOS', '').split(',')
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+EMAIL_SENDER = os.getenv('EMAIL_SENDER')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+TEAM_EMAILS = os.getenv('TEAM_EMAILS', '')
+SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
 
-# === ENVIRONMENT VARIABLES ===
-GITHUB_TOKEN = os.getenv("GH_TOKEN")
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
+# Parse teammates' emails into a list and remove empty entries
+RECIPIENTS = [email.strip() for email in TEAM_EMAILS.split(',') if email.strip()]
 
-if not all([GITHUB_TOKEN, EMAIL_USER, EMAIL_PASS]):
-    raise EnvironmentError("Missing required environment variables: GH_TOKEN, EMAIL_USER, EMAIL_PASS")
-
-# === BLOCK 1: FETCH OPEN PULL REQUESTS ===
-def fetch_pull_requests():
-    pr_data = []
+def get_open_prs(repo):
+    """
+    Fetch open pull requests from a GitHub repository using the GitHub API.
+    Returns a list of PR JSON objects.
+    Raises HTTPError on bad response.
+    """
+    url = f'https://api.github.com/repos/{repo}/pulls?state=open'
+    headers = {'Authorization': f'token {GITHUB_TOKEN}'}
     try:
-        github_client = Github(GITHUB_TOKEN)
-        for repo_name in REPOSITORIES:
-            try:
-                repo = github_client.get_repo(repo_name)
-                prs = repo.get_pulls(state="open")
-                for pr in prs:
-                    pr_data.append([repo_name, pr.title, pr.user.login, pr.html_url])
-            except GithubException as e:
-                print(f"[ERROR] Failed to fetch PRs for {repo_name}: {e}")
-    except Exception as e:
-        print("[CRITICAL] Error initializing GitHub client")
-        traceback.print_exc()
-    return pr_data
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except HTTPError as http_err:
+        print(f"HTTP error occurred while fetching PRs for repo '{repo}': {http_err}")
+    except RequestException as req_err:
+        print(f"Request error occurred while fetching PRs for repo '{repo}': {req_err}")
+    except Exception as err:
+        print(f"Unexpected error occurred while fetching PRs for repo '{repo}': {err}")
+    return []  # Return empty list if any error occurs
 
-# === BLOCK 2: GENERATE EXCEL REPORT ===
-def generate_excel(pr_data, report_path):
+def create_excel(all_prs, filename='open_prs_report.xlsx'):
+    """
+    Create an Excel file summarizing all PRs.
+    The Excel contains a table with columns including repository, PR number, title, author, URL, etc.
+    Returns the filename of the created Excel file.
+    """
     try:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Open PRs"
-        ws.append(["Repository", "PR Title", "Author", "URL"])
-        for row in pr_data:
-            ws.append(row)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        wb.save(report_path)
-        print(f"[INFO] Excel report saved to {report_path}")
+        data = []
+        for pr in all_prs:
+            data.append({
+                'Repository': pr['repo'],
+                'PR Number': pr['number'],
+                'Title': pr['title'],
+                'Author': pr['user']['login'],
+                'URL': pr['html_url'],
+                'Created At': pr['created_at'],
+                'Updated At': pr['updated_at'],
+                'State': pr['state']
+            })
+        df = pd.DataFrame(data)
+        df.to_excel(filename, index=False)
+        print(f"Excel report created: {filename}")
+        return filename
     except Exception as e:
-        print("[ERROR] Failed to generate Excel report")
-        traceback.print_exc()
+        print(f"Error creating Excel file: {e}")
+        raise  # Let the caller handle this
 
-# === BLOCK 3: SEND EMAIL WITH ATTACHMENT ===
-def send_email(report_path):
+def send_email_with_attachment(subject, body, attachment_path):
+    """
+    Sends an email with the specified subject and body, attaching the file at attachment_path.
+    The email is sent to all recipients in RECIPIENTS.
+    """
     try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = ", ".join(RECIPIENTS)
-        msg['Subject'] = "Automated Open PR Report"
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = ', '.join(RECIPIENTS)
+        msg.set_content(body)
 
-        body = (
-            "Hi team,\n\n"
-            "Attached is the latest automated report of open pull requests across our repositories.\n\n"
-            "Best regards,\nDevOps Bot"
-        )
-        msg.attach(MIMEText(body, "plain"))
+        # Read the Excel file and attach it
+        with open(attachment_path, 'rb') as f:
+            file_data = f.read()
+            file_name = os.path.basename(attachment_path)
 
-        with open(report_path, "rb") as file:
-            part = MIMEApplication(file.read(), Name="pr_report.xlsx")
-            part['Content-Disposition'] = 'attachment; filename="pr_report.xlsx"'
-            msg.attach(part)
+        msg.add_attachment(file_data, maintype='application',
+                           subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                           filename=file_name)
 
-        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, RECIPIENTS, msg.as_string())
-        server.quit()
-        print("[INFO] Email sent successfully.")
+        # Connect to SMTP server and send email
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as smtp:
+            smtp.starttls()
+            smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        print(f"Email successfully sent to: {', '.join(RECIPIENTS)}")
+    except FileNotFoundError:
+        print(f"Attachment file not found: {attachment_path}")
+    except smtplib.SMTPException as smtp_err:
+        print(f"SMTP error occurred: {smtp_err}")
     except Exception as e:
-        print("[ERROR] Failed to send email")
-        traceback.print_exc()
+        print(f"Unexpected error occurred while sending email: {e}")
 
-# === MAIN WORKFLOW ===
 def main():
+    # Collect PRs from all repos into one list
+    all_prs = []
+    for repo in GITHUB_REPOS:
+        repo = repo.strip()
+        if not repo:
+            continue
+        print(f"Fetching open PRs for repository: {repo}")
+        prs = get_open_prs(repo)
+        for pr in prs:
+            pr['repo'] = repo  # Tag PR with repo name
+        all_prs.extend(prs)
+
+    if not all_prs:
+        # No open PRs found - send simple notification email or skip?
+        body = "No open pull requests today across monitored repositories."
+        subject = "Daily Open PR Report - No Open PRs"
+        print(body)
+        # Optionally, you can send an email even if no PRs, or skip sending
+        return
+
+    # Create Excel report file
     try:
-        report_path = pathlib.Path(__file__).resolve().parent.parent / "reports" / "pr_report.xlsx"
-        pr_data = fetch_pull_requests()
-        if pr_data:
-            generate_excel(pr_data, report_path)
-            send_email(report_path)
-        else:
-            print("[INFO] No open pull requests found. Skipping report and email.")
-    except Exception as e:
-        print("[FATAL] Unexpected error in main workflow")
-        traceback.print_exc()
+        filename = create_excel(all_prs)
+    except Exception:
+        print("Failed to create Excel report, aborting email send.")
+        return
+
+    # Email the Excel report to teammates
+    subject = "Daily Open PR Report for Multiple Repositories"
+    body = f"Please find attached the daily report of open PRs for repos: {', '.join(GITHUB_REPOS)}."
+    send_email_with_attachment(subject, body, filename)
 
 if __name__ == "__main__":
     main()
