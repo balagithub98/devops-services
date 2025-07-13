@@ -39,4 +39,4 @@ jobs:
           TEAM_EMAILS: ${{ secrets.TEAM_EMAILS }}
           SMTP_SERVER: smtp.gmail.com
           SMTP_PORT: 587
-        run: python scripts/send_pr_report.py
+        run: python pr-reporter/scripts/send_pr_report.py
