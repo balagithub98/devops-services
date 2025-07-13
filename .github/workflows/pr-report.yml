@@ -12,9 +12,13 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-        
-      - name: Debug: list repo files
-        run: ls -lR
+
+      - name: Debug: Show repository files recursively
+        run: |
+          echo "Listing root directory:"
+          ls -l
+          echo "Listing all files recursively:"
+          ls -lR
 
       - name: Set up Python 3.9
         uses: actions/setup-python@v4
