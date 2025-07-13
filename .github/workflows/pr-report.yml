@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r scripts/requirements.txt
+          pip install -r requirements.txt
 
       - name: Run PR report script
         run: python scripts/send_pr_report.py
