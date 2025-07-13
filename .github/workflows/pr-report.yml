@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Debug: Show repository files recursively
+      - name: Show repository files recursively
         run: |
           echo "Listing root directory:"
           ls -l
