@@ -1,0 +1,42 @@
+name: Generate and Save PR Report
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'  # Weekdays at 9 AM UTC
+  workflow_dispatch:
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r pr-reporter/requirements.txt
+
+      - name: Run PR report script
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        run: python pr-reporter/scripts/generate_pr_report.py
+
+      - name: Commit and push report
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add pr-reporter/reports/pr_report.xlsx
+          git commit -m "chore: update PR report [auto]" || echo "No changes"
+          git push https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }} HEAD:dev
